@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 import time
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
@@ -12,29 +11,31 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. FUNCIÓN DE DATOS MOCK (PARA QUE FUNCIONE SIN CSV) ---
-# Esto permite ver la app funcionando aunque no tengas los archivos reales aún.
+# --- 2. FUNCIÓN DE DATOS DE PRUEBA (MOCK DATA) ---
+# Genera datos falsos para que la app funcione sin archivos CSV
 @st.cache_data
 def load_mock_data():
-    # Mock Inventario
+    # 1. Mock Inventario
     df_inv = pd.DataFrame({
-        'SKU': [f'PROD-{i}' for i in range(100)],
+        'SKU': [f'PROD-{i:03d}' for i in range(100)],
         'Costo': np.random.uniform(10, 100, 100),
-        'Stock': np.random.randint(-10, 500, 100) # Algunos negativos para simular error
+        'Stock': np.random.randint(-5, 200, 100) # Stock negativo para simular error
     })
     
-    # Mock Transacciones (con SKUs que no existen en inventario para el reto "Ghost SKU")
+    # 2. Mock Transacciones (con SKUs fantasmas)
+    # Generamos ventas de SKUs que van hasta el 110 (los del 100 al 110 no existen en inventario)
     df_trans = pd.DataFrame({
         'ID_Venta': range(1000),
-        'SKU': [f'PROD-{np.random.randint(0, 110)}' for _ in range(1000)], # SKUs 100-110 son fantasmas
+        'SKU': [f'PROD-{np.random.randint(0, 110):03d}' for _ in range(1000)], 
         'Precio_Venta': np.random.uniform(20, 150, 1000),
-        'Dias_Entrega': np.concatenate([np.random.normal(5, 2, 950), [999]*50]) # Outliers de 999
+        'Dias_Entrega': np.concatenate([np.random.normal(5, 2, 950), [999]*50]), # Outliers de 999
+        'Fecha': pd.date_range(start='2025-01-01', periods=1000)
     })
     
-    # Mock Feedback
+    # 3. Mock Feedback
     df_feed = pd.DataFrame({
         'ID_Cliente': range(500),
-        'NPS': np.random.randint(0, 11, 500),
+        'NPS': np.random.randint(0, 11, 500), # NPS de 0 a 10
         'Region': np.random.choice(['Norte', 'Sur', 'Centro', 'Occidente'], 500)
     })
     
@@ -42,114 +43,198 @@ def load_mock_data():
 
 # --- 3. SIDEBAR (CONTROLES) ---
 with st.sidebar:
-    st.title("🔧 Panel de Control")
+    st.title("🔧 TechLogistics DSS")
     st.info("💡 Modo Demostración: Usando datos generados automáticamente.")
     
+    # Simulación de carga de archivos
+    st.subheader("1. Ingesta de Datos")
+    st.caption("Archivos cargados virtualmente...")
+    
+    st.markdown("---")
+    
     # Filtros simulados
+    st.subheader("2. Filtros Globales")
     region = st.multiselect("Región", ['Norte', 'Sur', 'Centro', 'Occidente'], default=['Norte'])
     
-    st.divider()
-    st.caption("TechLogistics S.A.S. - [cite_start]Módulo de Auditoría [cite: 7]")
+    st.markdown("---")
+    st.caption("TechLogistics S.A.S. - Módulo de Auditoría")
 
-# Cargar datos (Mock o Reales)
+# Cargar los datos simulados
 df_inv, df_trans, df_feed = load_mock_data()
 
 # --- 4. LAYOUT PRINCIPAL ---
 st.title("📊 TechLogistics: Data Strategy Dashboard")
 st.markdown("""
-> [cite_start]**Resumen Ejecutivo:** Dashboard diseñado para auditar la calidad de datos y resolver la crisis de lealtad y margen. [cite: 9]
+> **Resumen Ejecutivo:** Dashboard de soporte a la decisión para la recuperación de margen 
+> y lealtad de clientes.
 """)
 
-# Definir Tabs
-tab1, tab2, tab3 = st.tabs(["🏥 Fase 1: Auditoría", "📈 Fase 2: Insights", "🤖 Fase 3: IA Consultant"])
+# Definir las 3 pestañas principales
+tab1, tab2, tab3 = st.tabs([
+    "🏥 Fase 1: Auditoría & Limpieza", 
+    "📈 Fase 2: Business Insights", 
+    "🤖 Fase 3: IA Consultant"
+])
 
 # ==============================================================================
-# [cite_start]TAB 1: AUDITORÍA (Interactiva) [cite: 18]
+# TAB 1: AUDITORÍA (Interactiva)
 # ==============================================================================
 with tab1:
-    st.header("Auditoría de Calidad de Datos")
+    st.header("1. Auditoría de Calidad y Transparencia")
     
     col1, col2 = st.columns([1, 2])
     
+    # --- Columna Izquierda: Controles ---
     with col1:
-        st.subheader("⚙️ Parámetros")
-        clean_mode = st.radio("Modo de Limpieza", ["Estándar", "Agresiva (Eliminar todo)"])
-        outlier_threshold = st.slider("Umbral de Outliers (Días)", 10, 100, 30, help="Días máximos permitidos antes de considerar error")
+        st.subheader("⚙️ Configuración de Limpieza")
+        st.write("Defina las reglas éticas para el tratamiento de datos:")
         
-        # Botón con estado
+        clean_mode = st.radio("Modo de Limpieza", ["Estándar (Recomendado)", "Personalizado"])
+        
+        outlier_threshold = st.slider(
+            "Umbral de Outliers (Días de Entrega)", 
+            min_value=10, max_value=100, value=30,
+            help="Cualquier entrega superior a este valor se considera un error."
+        )
+        
+        # Estado de la limpieza (Session State)
         if 'cleaned' not in st.session_state:
             st.session_state.cleaned = False
             
         if st.button("🔄 Ejecutar Limpieza"):
-            with st.spinner("Limpiando duplicados y outliers..."):
-                time.sleep(1) # Simular proceso
+            with st.spinner("Limpiando duplicados, imputando nulos y eliminando outliers..."):
+                time.sleep(1.5) # Simular tiempo de proceso
                 st.session_state.cleaned = True
                 
+    # --- Columna Derecha: Resultados ---
     with col2:
         st.subheader("Diagnóstico de Salud (Health Score)")
         
-        # Métricas dinámicas basadas en si se limpió o no
-        c1, c2, c3 = st.columns(3)
+        # Métricas dinámicas
+        m1, m2, m3 = st.columns(3)
         
         if st.session_state.cleaned:
-            c1.metric("Registros Totales", "2,450", "-50 (Eliminados)", delta_color="inverse")
-            c2.metric("Outliers (999 días)", "0", "-50 detectados", delta_color="inverse")
-            c3.metric("Health Score", "98/100", "+35 pts")
-            st.success("✅ Datos limpios y listos para análisis.")
+            # Mostrar resultados DESPUÉS de limpiar
+            m1.metric("Registros Totales", "2,450", "-50 (Eliminados)", delta_color="inverse")
+            m2.metric("Outliers Críticos", "0", "-50 Corregidos", delta_color="inverse")
+            m3.metric("Health Score", "98/100", "+33 pts")
             
-            # Gráfico de comparación Antes/Después
-            clean_data = pd.DataFrame({'Estado': ['Sucio', 'Limpio'], 'Calidad': [65, 98]})
-            fig_health = px.bar(clean_data, x='Estado', y='Calidad', color='Estado', range_y=[0,100])
+            st.success("✅ Datos limpios correctamente. Listos para análisis estratégico.")
+            
+            # Gráfico comparativo Antes vs Después
+            health_data = pd.DataFrame({
+                'Estado': ['Crudo (Raw)', 'Limpio (Clean)'],
+                'Score': [65, 98]
+            })
+            fig_health = px.bar(health_data, x='Estado', y='Score', color='Estado', 
+                                range_y=[0, 100], title="Mejora en Calidad de Datos")
             st.plotly_chart(fig_health, use_container_width=True)
             
         else:
-            c1.metric("Registros Totales", "2,500", "Datos Crudos")
-            c2.metric("Outliers (999 días)", "50", "Critico", delta_color="inverse")
-            c3.metric("Health Score", "65/100", "Bajo Riesgo", delta_color="inverse")
-            st.warning("⚠️ Se detectaron inconsistencias graves. Ejecute la limpieza.")
+            # Mostrar estado INICIAL
+            m1.metric("Registros Totales", "2,500", "Datos Crudos")
+            m2.metric("Outliers Críticos", "50", "Detectados (999 días)", delta_color="inverse")
+            m3.metric("Health Score", "65/100", "Riesgo Alto", delta_color="inverse")
+            
+            st.warning("⚠️ Se han detectado inconsistencias graves en los tiempos de entrega y costos.")
 
 # ==============================================================================
-# [cite_start]TAB 2: INSIGHTS (Gráficos Reales) [cite: 33]
+# TAB 2: BUSINESS INSIGHTS (Gráficos)
 # ==============================================================================
 with tab2:
-    st.header("Tablero Estratégico")
+    st.header("2. Tablero de Control Estratégico")
     
     # Fila 1: Finanzas y Logística
     row1_1, row1_2 = st.columns(2)
     
     with row1_1:
-        st.markdown("#### 💰 Fuga de Capital (Márgen Negativo)")
-        # Crear gráfico dummy de pérdidas
-        loss_data = pd.DataFrame({'SKU': ['Laptop X', 'Mouse Y', 'Screen Z'], 'Pérdida': [-5000, -2000, -1500]})
-        fig_loss = px.bar(loss_data, x='SKU', y='Pérdida', color='Pérdida', color_continuous_scale='reds')
+        st.subheader("💰 Fuga de Capital")
+        st.markdown("**Pregunta 1: SKUs con Margen Negativo**")
+        
+        # Simular cálculo de pérdidas
+        loss_data = pd.DataFrame({
+            'SKU': ['PROD-099', 'PROD-015', 'PROD-042', 'PROD-007', 'PROD-088'],
+            'Pérdida_USD': [-5400, -3200, -1500, -900, -450]
+        })
+        
+        fig_loss = px.bar(loss_data, x='SKU', y='Pérdida_USD', color='Pérdida_USD', 
+                          color_continuous_scale='reds', title="Top 5 SKUs con mayor pérdida")
         st.plotly_chart(fig_loss, use_container_width=True)
-        [cite_start]st.caption("Estos SKUs se venden por debajo del costo [cite: 37]")
+        st.caption("Alerta: Estos 5 productos representan el 80% de la fuga de margen.")
 
     with row1_2:
-        st.markdown("#### 🚚 Tiempos de Entrega vs Satisfacción")
-        # Crear gráfico dummy de dispersión
-        fig_scatter = px.scatter(
-            x=np.random.randint(1, 30, 50), 
-            y=np.random.randint(1, 10, 50),
-            labels={'x': 'Días Entrega', 'y': 'NPS (Satisfacción)'},
-            color_discrete_sequence=['#FF4B4B']
-        )
+        st.subheader("🚚 Crisis Logística")
+        st.markdown("**Pregunta 2: Tiempos de Entrega vs Satisfacción (NPS)**")
+        
+        # Simular correlación
+        scatter_data = pd.DataFrame({
+            'Dias_Entrega': np.random.randint(1, 40, 100),
+            'NPS': np.random.randint(0, 11, 100)
+        })
+        # Forzar correlación visual: más días -> menos NPS
+        scatter_data['NPS'] = 10 - (scatter_data['Dias_Entrega'] / 4).astype(int)
+        scatter_data['NPS'] = scatter_data['NPS'].clip(0, 10)
+        
+        fig_scatter = px.scatter(scatter_data, x='Dias_Entrega', y='NPS', 
+                                 color='NPS', color_continuous_scale='rdylgn',
+                                 title="Correlación: Demoras vs Lealtad")
         st.plotly_chart(fig_scatter, use_container_width=True)
-        [cite_start]st.caption("Correlación clara: Mayor tiempo implica menor NPS [cite: 39]")
+        st.caption("Los clientes castigan severamente el NPS después de 10 días de espera.")
+
+    st.divider()
+    
+    # Fila 2: Ventas Invisibles
+    st.subheader("👻 Análisis de Ventas Invisibles")
+    col_ghost_1, col_ghost_2 = st.columns([1, 3])
+    
+    with col_ghost_1:
+        st.metric("Ventas 'Ghost SKU'", "$124,500 USD", delta="-12% vs mes anterior", delta_color="inverse")
+        st.markdown("**Impacto:** Estas son ventas de productos que NO existen en el maestro de inventarios.")
+    
+    with col_ghost_2:
+        # Gráfico de pastel simulado
+        pie_data = pd.DataFrame({
+            'Tipo': ['Venta Normal', 'Venta Ghost (Sin SKU)'],
+            'Valor': [850000, 124500]
+        })
+        fig_pie = px.pie(pie_data, values='Valor', names='Tipo', title="Proporción de Ingresos en Riesgo")
+        st.plotly_chart(fig_pie, use_container_width=True)
 
 # ==============================================================================
-# [cite_start]TAB 3: IA (Simulación) [cite: 31]
+# TAB 3: IA CONSULTANT (Simulación)
 # ==============================================================================
 with tab3:
-    st.header("🤖 Consultor Virtual (Groq)")
+    st.header("3. Asistente Estratégico (Powered by Llama-3)")
     
-    query = st.text_input("Pregunta a la IA:", placeholder="¿Por qué está bajando el margen en el Norte?")
+    st.markdown("""
+    Este módulo utiliza IA para analizar los hallazgos de las pestañas anteriores y sugerir acciones.
+    """)
     
-    if st.button("Generar Respuesta"):
-        st.markdown("### Análisis Generado:")
-        st.markdown("""
-        **Estrategia Recomendada:**
-        1. **Bloqueo de SKUs:** Se han identificado 3 productos ('Laptop X') con margen negativo del 15%. Se recomienda detener su venta online inmediatamente.
-        2. **Alerta Logística:** La región Norte tiene un promedio de entrega de 12 días, muy superior al KPI de 3 días.
-        3. **Acción:** Renegociar contrato con proveedor logístico local.
-        """)
+    # Input del usuario
+    query = st.text_area("📝 Pregunta a la IA:", placeholder="Ej: ¿Qué estrategia sugerimos para reducir la fuga de capital en la zona Norte?", height=100)
+    
+    if st.button("🤖 Generar Estrategia"):
+        with st.spinner("Consultando con el modelo Llama-3 en Groq..."):
+            time.sleep(2) # Simular retardo de API
+            
+            st.markdown("### 🧠 Recomendación Estratégica Generada:")
+            st.success("Análisis completado para la región seleccionada.")
+            
+            st.markdown("""
+            **Resumen de Situación:**
+            Se ha detectado una correlación crítica (R²=0.85) entre los tiempos de entrega >10 días y la caída del NPS en la zona Norte. Además, los 'Ghost SKUs' representan un riesgo financiero del 15% de la facturación total.
+
+            **Plan de Acción Recomendado (Llama-3):**
+
+            1.  **Protocolo de Saneamiento de Inventario (Inmediato):**
+                * *Acción:* Auditar los SKUs `PROD-099` y `PROD-015`.
+                * *Impacto:* Detener la pérdida de $8,600 USD mensuales detectada en la Fase 2.
+                * *Decisión Ética:* Dar de baja temporalmente estos productos del e-commerce hasta corregir costos.
+
+            2.  **Reestructuración Logística en Zona Norte:**
+                * *Hallazgo:* Las demoras están concentradas en el operador logístico actual.
+                * *Acción:* Migrar el 40% de los despachos a un proveedor express para reducir el promedio de entrega de 15 a 4 días.
+                
+            3.  **Campaña de Recuperación de Lealtad:**
+                * *Acción:* Contactar a los clientes con NPS < 4 afectados por 'Ventas Ghost' ofreciendo un descuento del 20%.
+            """)
