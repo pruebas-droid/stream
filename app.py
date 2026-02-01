@@ -1,195 +1,155 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+import time
 
-# --- PAGE CONFIGURATION ---
+# --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="TechLogistics | Senior Consultant Dashboard",
+    page_title="TechLogistics | Senior Dashboard",
     page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# --- PLACEHOLDER FOR MODULE IMPORTS ---
-# In the future, you will uncomment these:
-# from src import data_loader, quality_manager, business_logic, ai_agent
+# --- 2. FUNCIÓN DE DATOS MOCK (PARA QUE FUNCIONE SIN CSV) ---
+# Esto permite ver la app funcionando aunque no tengas los archivos reales aún.
+@st.cache_data
+def load_mock_data():
+    # Mock Inventario
+    df_inv = pd.DataFrame({
+        'SKU': [f'PROD-{i}' for i in range(100)],
+        'Costo': np.random.uniform(10, 100, 100),
+        'Stock': np.random.randint(-10, 500, 100) # Algunos negativos para simular error
+    })
+    
+    # Mock Transacciones (con SKUs que no existen en inventario para el reto "Ghost SKU")
+    df_trans = pd.DataFrame({
+        'ID_Venta': range(1000),
+        'SKU': [f'PROD-{np.random.randint(0, 110)}' for _ in range(1000)], # SKUs 100-110 son fantasmas
+        'Precio_Venta': np.random.uniform(20, 150, 1000),
+        'Dias_Entrega': np.concatenate([np.random.normal(5, 2, 950), [999]*50]) # Outliers de 999
+    })
+    
+    # Mock Feedback
+    df_feed = pd.DataFrame({
+        'ID_Cliente': range(500),
+        'NPS': np.random.randint(0, 11, 500),
+        'Region': np.random.choice(['Norte', 'Sur', 'Centro', 'Occidente'], 500)
+    })
+    
+    return df_inv, df_trans, df_feed
 
-# --- CSS STYLING (Optional: Professional Look) ---
-st.markdown("""
-<style>
-    .metric-card {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- SIDEBAR: GLOBAL CONTROLS  ---
+# --- 3. SIDEBAR (CONTROLES) ---
 with st.sidebar:
-    st.title("🔧 TechLogistics DSS")
-    st.markdown("---")
+    st.title("🔧 Panel de Control")
+    st.info("💡 Modo Demostración: Usando datos generados automáticamente.")
     
-    st.subheader("1. Ingesta de Datos")
-    # File Uploader for the 3 specific files [cite: 12, 13, 16]
-    uploaded_inv = st.file_uploader("Inventario (CSV)", type="csv")
-    uploaded_trans = st.file_uploader("Transacciones (CSV)", type="csv")
-    uploaded_feed = st.file_uploader("Feedback (CSV)", type="csv")
-
-    st.markdown("---")
+    # Filtros simulados
+    region = st.multiselect("Región", ['Norte', 'Sur', 'Centro', 'Occidente'], default=['Norte'])
     
-    # Global filters are only active if data is loaded
-    st.subheader("2. Filtros Globales")
-    # These would populate dynamically based on the dataframe later
-    selected_region = st.multiselect("Región / Bodega", ["Norte", "Sur", "Centro", "Occidente"])
-    selected_date_range = st.date_input("Periodo de Análisis", [])
+    st.divider()
+    st.caption("TechLogistics S.A.S. - [cite_start]Módulo de Auditoría [cite: 7]")
 
-# --- MAIN LAYOUT ---
+# Cargar datos (Mock o Reales)
+df_inv, df_trans, df_feed = load_mock_data()
+
+# --- 4. LAYOUT PRINCIPAL ---
 st.title("📊 TechLogistics: Data Strategy Dashboard")
 st.markdown("""
-> **Resumen Ejecutivo:** Dashboard de soporte a la decisión para la recuperación de margen 
-> y lealtad de clientes. [cite: 9]
+> [cite_start]**Resumen Ejecutivo:** Dashboard diseñado para auditar la calidad de datos y resolver la crisis de lealtad y margen. [cite: 9]
 """)
 
-# Check if files are uploaded before showing the main tabs
-if not (uploaded_inv and uploaded_trans and uploaded_feed):
-    st.info("👋 Por favor, cargue los tres archivos CSV en el panel lateral para iniciar la auditoría.")
-    st.stop()
-
-# --- TABS FOR PROJECT PHASES  ---
-tab_audit, tab_business, tab_ai = st.tabs([
-    "🏥 Fase 1: Auditoría & Limpieza",
-    "📈 Fase 2: Business Insights",
-    "🤖 Fase 3: Consultor IA (Groq)"
-])
+# Definir Tabs
+tab1, tab2, tab3 = st.tabs(["🏥 Fase 1: Auditoría", "📈 Fase 2: Insights", "🤖 Fase 3: IA Consultant"])
 
 # ==============================================================================
-# TAB 1: DATA HEALTH & CLEANING [cite: 18]
+# [cite_start]TAB 1: AUDITORÍA (Interactiva) [cite: 18]
 # ==============================================================================
-with tab_audit:
-    st.header("1. Auditoría de Calidad y Transparencia")
+with tab1:
+    st.header("Auditoría de Calidad de Datos")
     
-    col_audit_left, col_audit_right = st.columns([1, 2])
+    col1, col2 = st.columns([1, 2])
     
-    # --- Left: Cleaning Parameters (User Control) ---
-    with col_audit_left:
-        st.subheader("⚙️ Configuración de Limpieza")
-        st.write("Defina las reglas éticas para el tratamiento de datos:")
+    with col1:
+        st.subheader("⚙️ Parámetros")
+        clean_mode = st.radio("Modo de Limpieza", ["Estándar", "Agresiva (Eliminar todo)"])
+        outlier_threshold = st.slider("Umbral de Outliers (Días)", 10, 100, 30, help="Días máximos permitidos antes de considerar error")
         
-        # 1. Outlier Strategy [cite: 15, 20]
-        st.markdown("**1. Tratamiento de Outliers (Tiempos de Entrega)**")
-        outlier_method = st.radio(
-            "Método de detección:",
-            ["Rango Intercuartil (IQR)", "Z-Score (Desviación Estándar)"]
-        )
-        if outlier_method == "Z-Score (Desviación Estándar)":
-            sigma_threshold = st.slider("Umbral Sigma", 1.0, 4.0, 3.0)
+        # Botón con estado
+        if 'cleaned' not in st.session_state:
+            st.session_state.cleaned = False
+            
+        if st.button("🔄 Ejecutar Limpieza"):
+            with st.spinner("Limpiando duplicados y outliers..."):
+                time.sleep(1) # Simular proceso
+                st.session_state.cleaned = True
+                
+    with col2:
+        st.subheader("Diagnóstico de Salud (Health Score)")
         
-        # 2. Null Strategy [cite: 21]
-        st.markdown("**2. Imputación de Valores Nulos**")
-        fill_strategy = st.selectbox(
-            "Estrategia para Costos/Precios faltantes:",
-            ["Usar la Media", "Usar la Mediana", "Eliminar Registros"]
-        )
+        # Métricas dinámicas basadas en si se limpió o no
+        c1, c2, c3 = st.columns(3)
         
-        # 3. Ghost SKUs Strategy [cite: 28]
-        st.markdown("**3. Ventas sin Inventario (Ghost SKUs)**")
-        ghost_action = st.radio(
-            "Acción para SKUs huérfanos:",
-            ["Conservar (Marcar como riesgo)", "Eliminar del análisis financiero"]
-        )
-
-        btn_run_cleaning = st.button("🔄 Ejecutar Limpieza y Calcular Health Score")
-
-    # --- Right: Results & Health Score ---
-    with col_audit_right:
-        if btn_run_cleaning:
-            st.success("¡Limpieza Ejecutada Exitosamente!")
+        if st.session_state.cleaned:
+            c1.metric("Registros Totales", "2,450", "-50 (Eliminados)", delta_color="inverse")
+            c2.metric("Outliers (999 días)", "0", "-50 detectados", delta_color="inverse")
+            c3.metric("Health Score", "98/100", "+35 pts")
+            st.success("✅ Datos limpios y listos para análisis.")
             
-            # Placeholder Metrics: Before vs After [cite: 19]
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Filas Originales", "17,000", "0")
-            m2.metric("Filas Limpias", "16,450", "-550 (3.2%)")
-            m3.metric("Health Score Global", "92/100", "+15 pts")
+            # Gráfico de comparación Antes/Después
+            clean_data = pd.DataFrame({'Estado': ['Sucio', 'Limpio'], 'Calidad': [65, 98]})
+            fig_health = px.bar(clean_data, x='Estado', y='Calidad', color='Estado', range_y=[0,100])
+            st.plotly_chart(fig_health, use_container_width=True)
             
-            # Detailed Health Report Expander
-            with st.expander("Ver Reporte Detallado de Anomalías"):
-                st.write("Aquí se mostrarán los duplicados eliminados y outliers detectados.")
-            
-            # Download Button 
-            st.download_button(
-                label="📥 Descargar Datos Limpios (.csv)",
-                data="sample_data", # Replace with actual CSV string
-                file_name="techlogistics_clean_data.csv",
-                mime="text/csv"
-            )
         else:
-            st.info("Presione 'Ejecutar Limpieza' para ver el diagnóstico.")
+            c1.metric("Registros Totales", "2,500", "Datos Crudos")
+            c2.metric("Outliers (999 días)", "50", "Critico", delta_color="inverse")
+            c3.metric("Health Score", "65/100", "Bajo Riesgo", delta_color="inverse")
+            st.warning("⚠️ Se detectaron inconsistencias graves. Ejecute la limpieza.")
 
 # ==============================================================================
-# TAB 2: BUSINESS INSIGHTS (The 5 Questions) [cite: 33]
+# [cite_start]TAB 2: INSIGHTS (Gráficos Reales) [cite: 33]
 # ==============================================================================
-with tab_business:
-    st.header("2. Tablero de Control Estratégico")
+with tab2:
+    st.header("Tablero Estratégico")
     
-    # Section 1: Financials [cite: 37, 41]
-    st.subheader("💰 Fuga de Capital & Rentabilidad")
-    b1, b2 = st.columns(2)
-    with b1:
-        st.markdown("**Pregunta 1: SKUs con Margen Negativo**")
-        st.write("[GRÁFICO: Barra de Top SKUs con pérdidas]")
-    with b2:
-        st.markdown("**Pregunta 3: Impacto Ventas Invisibles**")
-        st.metric("Pérdida por Descontrol de Inventario", "$124,500 USD", delta="-12%", delta_color="inverse")
-
-    st.divider()
-
-    # Section 2: Logistics & Operations [cite: 39, 45]
-    st.subheader("🚚 Operaciones y Logística")
-    b3, b4 = st.columns(2)
-    with b3:
-        st.markdown("**Pregunta 2: Correlación Tiempos vs. NPS**")
-        st.write("[GRÁFICO: Heatmap de Bodegas]")
-    with b4:
-        st.markdown("**Pregunta 5: Riesgo Operativo (Stock vs. Soporte)**")
-        st.write("[GRÁFICO: Scatter Plot Antigüedad vs Tickets]")
-        
-    st.divider()
+    # Fila 1: Finanzas y Logística
+    row1_1, row1_2 = st.columns(2)
     
-    # Section 3: Customer Fidelity [cite: 43]
-    st.subheader("❤️ Diagnóstico de Fidelidad")
-    st.markdown("**Pregunta 4: Paradoja de Disponibilidad vs. Sentimiento**")
-    st.write("[GRÁFICO: Scatter Categorías (Stock Alto / NPS Bajo)]")
+    with row1_1:
+        st.markdown("#### 💰 Fuga de Capital (Márgen Negativo)")
+        # Crear gráfico dummy de pérdidas
+        loss_data = pd.DataFrame({'SKU': ['Laptop X', 'Mouse Y', 'Screen Z'], 'Pérdida': [-5000, -2000, -1500]})
+        fig_loss = px.bar(loss_data, x='SKU', y='Pérdida', color='Pérdida', color_continuous_scale='reds')
+        st.plotly_chart(fig_loss, use_container_width=True)
+        [cite_start]st.caption("Estos SKUs se venden por debajo del costo [cite: 37]")
+
+    with row1_2:
+        st.markdown("#### 🚚 Tiempos de Entrega vs Satisfacción")
+        # Crear gráfico dummy de dispersión
+        fig_scatter = px.scatter(
+            x=np.random.randint(1, 30, 50), 
+            y=np.random.randint(1, 10, 50),
+            labels={'x': 'Días Entrega', 'y': 'NPS (Satisfacción)'},
+            color_discrete_sequence=['#FF4B4B']
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+        [cite_start]st.caption("Correlación clara: Mayor tiempo implica menor NPS [cite: 39]")
 
 # ==============================================================================
-# TAB 3: AI CONSULTANT (Groq) [cite: 31]
+# [cite_start]TAB 3: IA (Simulación) [cite: 31]
 # ==============================================================================
-with tab_ai:
-    st.header("3. Asistente Estratégico (Powered by Llama-3)")
+with tab3:
+    st.header("🤖 Consultor Virtual (Groq)")
     
-    st.markdown("""
-    Este módulo analiza el resumen estadístico de los datos filtrados y genera 
-    recomendaciones estratégicas en tiempo real. [cite: 32]
-    """)
+    query = st.text_input("Pregunta a la IA:", placeholder="¿Por qué está bajando el margen en el Norte?")
     
-    # Context Display
-    st.info(f"Contexto actual: Análisis basado en {len(selected_region)} regiones seleccionadas.")
-    
-    # User Input
-    user_query = st.text_area(
-        "📝 Pregunta a la Junta Directiva Digital:", 
-        placeholder="Ej: ¿Qué estrategia sugerimos para reducir la fuga de capital en la zona Norte?"
-    )
-    
-    if st.button("🤖 Generar Estrategia"):
-        with st.spinner("Consultando con el modelo Llama-3 en Groq..."):
-            # Mock response for structure
-            st.markdown("### Recomendación Estratégica")
-            st.markdown("""
-            **1. Optimización de Inventario:** Se detectó que el 15% de las pérdidas provienen de SKUs fantasmas...
-            
-            **2. Acción Logística:** La bodega 'Norte' presenta tiempos de entrega superiores a 10 días...
-            
-            **3. Fidelización:** Implementar política de devoluciones para productos con NPS < 3...
-            """)
+    if st.button("Generar Respuesta"):
+        st.markdown("### Análisis Generado:")
+        st.markdown("""
+        **Estrategia Recomendada:**
+        1. **Bloqueo de SKUs:** Se han identificado 3 productos ('Laptop X') con margen negativo del 15%. Se recomienda detener su venta online inmediatamente.
+        2. **Alerta Logística:** La región Norte tiene un promedio de entrega de 12 días, muy superior al KPI de 3 días.
+        3. **Acción:** Renegociar contrato con proveedor logístico local.
+        """)
