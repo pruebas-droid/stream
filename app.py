@@ -1,240 +1,190 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
-import time
 
-# --- 1. CONFIGURACIÓN DE PÁGINA ---
+# -----------------------------------------------------------------------------
+# 1. CONFIGURACIÓN DE LA PÁGINA
+# -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="TechLogistics | Senior Dashboard",
     page_icon="📊",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# --- 2. FUNCIÓN DE DATOS DE PRUEBA (MOCK DATA) ---
-# Genera datos falsos para que la app funcione sin archivos CSV
-@st.cache_data
-def load_mock_data():
-    # 1. Mock Inventario
-    df_inv = pd.DataFrame({
-        'SKU': [f'PROD-{i:03d}' for i in range(100)],
-        'Costo': np.random.uniform(10, 100, 100),
-        'Stock': np.random.randint(-5, 200, 100) # Stock negativo para simular error
-    })
-    
-    # 2. Mock Transacciones (con SKUs fantasmas)
-    # Generamos ventas de SKUs que van hasta el 110 (los del 100 al 110 no existen en inventario)
-    df_trans = pd.DataFrame({
-        'ID_Venta': range(1000),
-        'SKU': [f'PROD-{np.random.randint(0, 110):03d}' for _ in range(1000)], 
-        'Precio_Venta': np.random.uniform(20, 150, 1000),
-        'Dias_Entrega': np.concatenate([np.random.normal(5, 2, 950), [999]*50]), # Outliers de 999
-        'Fecha': pd.date_range(start='2025-01-01', periods=1000)
-    })
-    
-    # 3. Mock Feedback
-    df_feed = pd.DataFrame({
-        'ID_Cliente': range(500),
-        'NPS': np.random.randint(0, 11, 500), # NPS de 0 a 10
-        'Region': np.random.choice(['Norte', 'Sur', 'Centro', 'Occidente'], 500)
-    })
-    
-    return df_inv, df_trans, df_feed
-
-# --- 3. SIDEBAR (CONTROLES) ---
-with st.sidebar:
-    st.title("🔧 TechLogistics DSS")
-    st.info("💡 Modo Demostración: Usando datos generados automáticamente.")
-    
-    # Simulación de carga de archivos
-    st.subheader("1. Ingesta de Datos")
-    st.caption("Archivos cargados virtualmente...")
-    
-    st.markdown("---")
-    
-    # Filtros simulados
-    st.subheader("2. Filtros Globales")
-    region = st.multiselect("Región", ['Norte', 'Sur', 'Centro', 'Occidente'], default=['Norte'])
-    
-    st.markdown("---")
-    st.caption("TechLogistics S.A.S. - Módulo de Auditoría")
-
-# Cargar los datos simulados
-df_inv, df_trans, df_feed = load_mock_data()
-
-# --- 4. LAYOUT PRINCIPAL ---
-st.title("📊 TechLogistics: Data Strategy Dashboard")
+# Títulos y Estilos
 st.markdown("""
-> **Resumen Ejecutivo:** Dashboard de soporte a la decisión para la recuperación de margen 
-> y lealtad de clientes.
-""")
+<style>
+    .main-header {font-size: 2.5rem; color: #1E3A8A; font-weight: bold;}
+    .sub-header {font-size: 1.5rem; color: #4B5563;}
+</style>
+""", unsafe_allow_html=True)
 
-# Definir las 3 pestañas principales
-tab1, tab2, tab3 = st.tabs([
-    "🏥 Fase 1: Auditoría & Limpieza", 
-    "📈 Fase 2: Business Insights", 
-    "🤖 Fase 3: IA Consultant"
+st.markdown('<p class="main-header">📊 TechLogistics: DSS & AI Strategy</p>', unsafe_allow_html=True)
+st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# 2. CARGA Y PROCESAMIENTO DE DATOS (ETL BÁSICO)
+# -----------------------------------------------------------------------------
+@st.cache_data
+def load_data():
+    # Cargar los archivos (Asegúrate que los nombres coinciden con tus archivos locales)
+    try:
+        df_inv = pd.read_csv("inventario_central_v2_limpio.csv")
+        # El archivo de transacciones parece tener un nombre largo, ajústalo si es necesario
+        df_trans = pd.read_csv("transacciones_logistica_final_unificado.xlsx - Sheet1.csv")
+        df_feed = pd.read_csv("feedback_clientes_limpio.csv")
+        return df_inv, df_trans, df_feed
+    except FileNotFoundError as e:
+        st.error(f"Error cargando archivos: {e}")
+        return None, None, None
+
+def create_master_table(inv, trans, feed):
+    # Merge 1: Transacciones + Inventario (Left Join para mantener todas las ventas)
+    # Asumimos que la llave común es SKU_ID (ajustar si los nombres varían ligeramente)
+    df_merged = pd.merge(trans, inv, on="SKU_ID", how="left", suffixes=('_trx', '_inv'))
+    
+    # Merge 2: Resultado + Feedback (Left Join)
+    # Asumimos que la llave común es Transaccion_ID
+    df_final = pd.merge(df_merged, feed, on="Transaccion_ID", how="left")
+    
+    return df_final
+
+# Ejecutar carga
+df_inv, df_trans, df_feed = load_data()
+
+if df_inv is not None:
+    df_master = create_master_table(df_inv, df_trans, df_feed)
+    st.sidebar.success("✅ Datos cargados y unificados correctamente")
+    
+    # Filtros Globales (Sidebar)
+    st.sidebar.header("🔍 Filtros Globales")
+    selected_city = st.sidebar.multiselect(
+        "Filtrar por Ciudad", 
+        options=df_master['Ciudad_Destino_norm'].unique(),
+        default=df_master['Ciudad_Destino_norm'].unique()
+    )
+    
+    # Filtrar el dataset maestro
+    df_filtered = df_master[df_master['Ciudad_Destino_norm'].isin(selected_city)]
+
+else:
+    st.stop()
+
+# -----------------------------------------------------------------------------
+# 3. ESTRUCTURA DE PESTAÑAS
+# -----------------------------------------------------------------------------
+tab_audit, tab_eda, tab_ai = st.tabs([
+    "📂 Auditoría & Calidad de Datos", 
+    "📈 EDA: Análisis Exploratorio", 
+    "🤖 Asistente Estratégico (Groq)"
 ])
 
-# ==============================================================================
-# TAB 1: AUDITORÍA (Interactiva)
-# ==============================================================================
-with tab1:
-    st.header("1. Auditoría de Calidad y Transparencia")
+# --- PESTAÑA 1: AUDITORÍA DE DATOS ---
+with tab_audit:
+    st.header("Auditoría de Limpieza")
+    st.caption("Visualización de los datasets originales post-limpieza para validación.")
     
-    col1, col2 = st.columns([1, 2])
-    
-    # --- Columna Izquierda: Controles ---
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.subheader("⚙️ Configuración de Limpieza")
-        st.write("Defina las reglas éticas para el tratamiento de datos:")
+        st.subheader("Inventario")
+        st.dataframe(df_inv.head(), use_container_width=True)
+        st.info(f"Registros: {df_inv.shape[0]} | Cols: {df_inv.shape[1]}")
         
-        clean_mode = st.radio("Modo de Limpieza", ["Estándar (Recomendado)", "Personalizado"])
-        
-        outlier_threshold = st.slider(
-            "Umbral de Outliers (Días de Entrega)", 
-            min_value=10, max_value=100, value=30,
-            help="Cualquier entrega superior a este valor se considera un error."
-        )
-        
-        # Estado de la limpieza (Session State)
-        if 'cleaned' not in st.session_state:
-            st.session_state.cleaned = False
-            
-        if st.button("🔄 Ejecutar Limpieza"):
-            with st.spinner("Limpiando duplicados, imputando nulos y eliminando outliers..."):
-                time.sleep(1.5) # Simular tiempo de proceso
-                st.session_state.cleaned = True
-                
-    # --- Columna Derecha: Resultados ---
     with col2:
-        st.subheader("Diagnóstico de Salud (Health Score)")
+        st.subheader("Transacciones")
+        st.dataframe(df_trans.head(), use_container_width=True)
+        st.info(f"Registros: {df_trans.shape[0]} | Cols: {df_trans.shape[1]}")
         
-        # Métricas dinámicas
-        m1, m2, m3 = st.columns(3)
-        
-        if st.session_state.cleaned:
-            # Mostrar resultados DESPUÉS de limpiar
-            m1.metric("Registros Totales", "2,450", "-50 (Eliminados)", delta_color="inverse")
-            m2.metric("Outliers Críticos", "0", "-50 Corregidos", delta_color="inverse")
-            m3.metric("Health Score", "98/100", "+33 pts")
-            
-            st.success("✅ Datos limpios correctamente. Listos para análisis estratégico.")
-            
-            # Gráfico comparativo Antes vs Después
-            health_data = pd.DataFrame({
-                'Estado': ['Crudo (Raw)', 'Limpio (Clean)'],
-                'Score': [65, 98]
-            })
-            fig_health = px.bar(health_data, x='Estado', y='Score', color='Estado', 
-                                range_y=[0, 100], title="Mejora en Calidad de Datos")
-            st.plotly_chart(fig_health, use_container_width=True)
-            
-        else:
-            # Mostrar estado INICIAL
-            m1.metric("Registros Totales", "2,500", "Datos Crudos")
-            m2.metric("Outliers Críticos", "50", "Detectados (999 días)", delta_color="inverse")
-            m3.metric("Health Score", "65/100", "Riesgo Alto", delta_color="inverse")
-            
-            st.warning("⚠️ Se han detectado inconsistencias graves en los tiempos de entrega y costos.")
+    with col3:
+        st.subheader("Feedback")
+        st.dataframe(df_feed.head(), use_container_width=True)
+        st.info(f"Registros: {df_feed.shape[0]} | Cols: {df_feed.shape[1]}")
 
-# ==============================================================================
-# TAB 2: BUSINESS INSIGHTS (Gráficos)
-# ==============================================================================
-with tab2:
-    st.header("2. Tablero de Control Estratégico")
-    
-    # Fila 1: Finanzas y Logística
-    row1_1, row1_2 = st.columns(2)
-    
-    with row1_1:
-        st.subheader("💰 Fuga de Capital")
-        st.markdown("**Pregunta 1: SKUs con Margen Negativo**")
-        
-        # Simular cálculo de pérdidas
-        loss_data = pd.DataFrame({
-            'SKU': ['PROD-099', 'PROD-015', 'PROD-042', 'PROD-007', 'PROD-088'],
-            'Pérdida_USD': [-5400, -3200, -1500, -900, -450]
-        })
-        
-        fig_loss = px.bar(loss_data, x='SKU', y='Pérdida_USD', color='Pérdida_USD', 
-                          color_continuous_scale='reds', title="Top 5 SKUs con mayor pérdida")
-        st.plotly_chart(fig_loss, use_container_width=True)
-        st.caption("Alerta: Estos 5 productos representan el 80% de la fuga de margen.")
+    st.markdown("### Integridad del Master Table")
+    st.write("Muestra del tablón unificado (Transacciones + Inventario + Feedback):")
+    st.dataframe(df_master.head(3), use_container_width=True)
 
-    with row1_2:
-        st.subheader("🚚 Crisis Logística")
-        st.markdown("**Pregunta 2: Tiempos de Entrega vs Satisfacción (NPS)**")
-        
-        # Simular correlación
-        scatter_data = pd.DataFrame({
-            'Dias_Entrega': np.random.randint(1, 40, 100),
-            'NPS': np.random.randint(0, 11, 100)
-        })
-        # Forzar correlación visual: más días -> menos NPS
-        scatter_data['NPS'] = 10 - (scatter_data['Dias_Entrega'] / 4).astype(int)
-        scatter_data['NPS'] = scatter_data['NPS'].clip(0, 10)
-        
-        fig_scatter = px.scatter(scatter_data, x='Dias_Entrega', y='NPS', 
-                                 color='NPS', color_continuous_scale='rdylgn',
-                                 title="Correlación: Demoras vs Lealtad")
-        st.plotly_chart(fig_scatter, use_container_width=True)
-        st.caption("Los clientes castigan severamente el NPS después de 10 días de espera.")
+# --- PESTAÑA 2: EDA (UNIVARIADO & MULTIVARIADO) ---
+with tab_eda:
+    st.header("Análisis Exploratorio de Datos (EDA)")
+    
+    # Sub-sección: Univariado
+    with st.expander("📊 Análisis Univariado (Distribuciones Individuales)", expanded=True):
+        st.markdown("**Variables Cuantitativas (Ej. Precios, Tiempos)**")
+        col_u1, col_u2 = st.columns(2)
+        with col_u1:
+            # Placeholder para histograma
+            st.metric("Total Ventas (USD)", f"${df_filtered['Precio_Venta_Final'].sum():,.2f}")
+            fig_hist = px.histogram(df_filtered, x="Precio_Venta_Final", title="Distribución de Precios de Venta")
+            st.plotly_chart(fig_hist, use_container_width=True)
+            
+        with col_u2:
+            st.markdown("**Variables Cualitativas (Ej. Estado Envío, Rating)**")
+            # Placeholder para conteo
+            fig_bar = px.bar(df_filtered['Estado_Envio'].value_counts().reset_index(), 
+                             x='Estado_Envio', y='count', title="Conteo por Estado de Envío")
+            st.plotly_chart(fig_bar, use_container_width=True)
 
-    st.divider()
-    
-    # Fila 2: Ventas Invisibles
-    st.subheader("👻 Análisis de Ventas Invisibles")
-    col_ghost_1, col_ghost_2 = st.columns([1, 3])
-    
-    with col_ghost_1:
-        st.metric("Ventas 'Ghost SKU'", "$124,500 USD", delta="-12% vs mes anterior", delta_color="inverse")
-        st.markdown("**Impacto:** Estas son ventas de productos que NO existen en el maestro de inventarios.")
-    
-    with col_ghost_2:
-        # Gráfico de pastel simulado
-        pie_data = pd.DataFrame({
-            'Tipo': ['Venta Normal', 'Venta Ghost (Sin SKU)'],
-            'Valor': [850000, 124500]
-        })
-        fig_pie = px.pie(pie_data, values='Valor', names='Tipo', title="Proporción de Ingresos en Riesgo")
-        st.plotly_chart(fig_pie, use_container_width=True)
+    # Sub-sección: Multivariado
+    with st.expander("🔗 Análisis Multivariado (Correlaciones & Cruces)", expanded=True):
+        st.markdown("Cruce de variables para responder preguntas de negocio.")
+        
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.subheader("Relación Precio vs. Costo")
+            # Scatter Plot simple
+            fig_scatter = px.scatter(
+                df_filtered, 
+                x="Costo_Unitario_USD", 
+                y="Precio_Venta_Final", 
+                color="Categoria",
+                title="Dispersión: Costo vs. Precio Venta"
+            )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+            
+        with col_m2:
+            st.subheader("Tiempo Entrega vs. Satisfacción (NPS)")
+            # Boxplot o Scatter
+            if 'Satisfaccion_NPS' in df_filtered.columns:
+                fig_box = px.box(
+                    df_filtered, 
+                    x="Tiempo_Entrega_Real", 
+                    y="Satisfaccion_NPS", 
+                    title="Impacto del Tiempo en NPS"
+                )
+                st.plotly_chart(fig_box, use_container_width=True)
+            else:
+                st.warning("Columna NPS no encontrada en el merge.")
 
-# ==============================================================================
-# TAB 3: IA CONSULTANT (Simulación)
-# ==============================================================================
-with tab3:
-    st.header("3. Asistente Estratégico (Powered by Llama-3)")
-    
+# --- PESTAÑA 3: IA & INSIGHTS ---
+with tab_ai:
+    st.header("🤖 Asistente Estratégico (Powered by Groq)")
     st.markdown("""
-    Este módulo utiliza IA para analizar los hallazgos de las pestañas anteriores y sugerir acciones.
+    Este módulo utiliza IA para interpretar los hallazgos del EDA y sugerir acciones correctivas.
     """)
     
-    # Input del usuario
-    query = st.text_area("📝 Pregunta a la IA:", placeholder="Ej: ¿Qué estrategia sugerimos para reducir la fuga de capital en la zona Norte?", height=100)
+    col_ai_input, col_ai_output = st.columns([1, 2])
     
-    if st.button("🤖 Generar Estrategia"):
-        with st.spinner("Consultando con el modelo Llama-3 en Groq..."):
-            time.sleep(2) # Simular retardo de API
+    with col_ai_input:
+        st.subheader("Consulta")
+        user_query = st.text_area(
+            "Escribe tu pregunta de negocio:",
+            placeholder="Ej: ¿Por qué tenemos SKUs con stock alto y ventas bajas?",
+            height=150
+        )
+        if st.button("Generar Insights 🚀"):
+            st.toast("Conectando con Llama-3 en Groq...")
+            # AQUI IRÁ LA LÓGICA DE LLAMADA A LA API
+            st.session_state['ai_response'] = "🚧 [Simulación] La IA sugiere revisar los SKUs de la categoría 'Laptops' en la bodega Norte..."
             
-            st.markdown("### 🧠 Recomendación Estratégica Generada:")
-            st.success("Análisis completado para la región seleccionada.")
-            
-            st.markdown("""
-            **Resumen de Situación:**
-            Se ha detectado una correlación crítica (R²=0.85) entre los tiempos de entrega >10 días y la caída del NPS en la zona Norte. Además, los 'Ghost SKUs' representan un riesgo financiero del 15% de la facturación total.
+    with col_ai_output:
+        st.subheader("Respuesta Generativa")
+        if 'ai_response' in st.session_state:
+            st.info(st.session_state['ai_response'])
+        else:
+            st.markdown("*La respuesta de la IA aparecerá aquí...*")
 
-            **Plan de Acción Recomendado (Llama-3):**
-
-            1.  **Protocolo de Saneamiento de Inventario (Inmediato):**
-                * *Acción:* Auditar los SKUs `PROD-099` y `PROD-015`.
-                * *Impacto:* Detener la pérdida de $8,600 USD mensuales detectada en la Fase 2.
-                * *Decisión Ética:* Dar de baja temporalmente estos productos del e-commerce hasta corregir costos.
-
-            2.  **Reestructuración Logística en Zona Norte:**
-                * *Hallazgo:* Las demoras están concentradas en el operador logístico actual.
-                * *Acción:* Migrar el 40% de los despachos a un proveedor express para reducir el promedio de entrega de 15 a 4 días.
-                
-            3.  **Campaña de Recuperación de Lealtad:**
-                * *Acción:* Contactar a los clientes con NPS < 4 afectados por 'Ventas Ghost' ofreciendo un descuento del 20%.
-            """)
+# Footer
+st.markdown("---")
+st.caption("TechLogistics DSS v1.0 | Desarrollado con Streamlit & Python")
