@@ -12,11 +12,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Títulos y Estilos
+# Estilos personalizados
 st.markdown("""
 <style>
     .main-header {font-size: 2.5rem; color: #1E3A8A; font-weight: bold;}
     .sub-header {font-size: 1.5rem; color: #4B5563;}
+    .upload-box {border: 2px dashed #4B5563; padding: 20px; border-radius: 10px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -24,167 +25,153 @@ st.markdown('<p class="main-header">📊 TechLogistics: DSS & AI Strategy</p>', 
 st.markdown("---")
 
 # -----------------------------------------------------------------------------
-# 2. CARGA Y PROCESAMIENTO DE DATOS (ETL BÁSICO)
+# 2. CARGA DE DATOS (MANUAL VIA SIDEBAR)
 # -----------------------------------------------------------------------------
+st.sidebar.header("📂 Configuración y Datos")
+st.sidebar.markdown("Sube aquí los archivos limpios para iniciar el análisis.")
+
+# Widgets de carga
+up_inv = st.sidebar.file_uploader("1. Inventario (CSV)", type="csv")
+up_trans = st.sidebar.file_uploader("2. Transacciones (CSV)", type="csv")
+up_feed = st.sidebar.file_uploader("3. Feedback Clientes (CSV)", type="csv")
+
+# Función de procesamiento (Cacheada para no re-ejecutar en cada click)
 @st.cache_data
-def load_data():
-    # Cargar los archivos (Asegúrate que los nombres coinciden con tus archivos locales)
+def process_and_merge(file_inv, file_trans, file_feed):
+    # Leer CSVs desde los objetos subidos
+    df_i = pd.read_csv(file_inv)
+    df_t = pd.read_csv(file_trans)
+    df_f = pd.read_csv(file_feed)
+    
+    # --- LÓGICA DE MERGE ---
+    # Merge 1: Transacciones + Inventario
+    # Aseguramos que SKU_ID sea string para evitar errores de tipo
+    df_t['SKU_ID'] = df_t['SKU_ID'].astype(str)
+    df_i['SKU_ID'] = df_i['SKU_ID'].astype(str)
+    
+    df_merged = pd.merge(df_t, df_i, on="SKU_ID", how="left", suffixes=('_trx', '_inv'))
+    
+    # Merge 2: Resultado + Feedback
+    df_merged['Transaccion_ID'] = df_merged['Transaccion_ID'].astype(str)
+    df_f['Transaccion_ID'] = df_f['Transaccion_ID'].astype(str)
+    
+    df_final = pd.merge(df_merged, df_f, on="Transaccion_ID", how="left")
+    
+    return df_i, df_t, df_f, df_final
+
+# -----------------------------------------------------------------------------
+# 3. LÓGICA PRINCIPAL (CONTROL DE FLUJO)
+# -----------------------------------------------------------------------------
+
+# Verificamos si TODO fue subido
+if up_inv is not None and up_trans is not None and up_feed is not None:
+    
+    # Procesar datos
     try:
-        df_inv = pd.read_csv("inventario_central_v2_limpio.csv")
-        # El archivo de transacciones parece tener un nombre largo, ajústalo si es necesario
-        df_trans = pd.read_csv("transacciones_logistica_final_unificado.xlsx - Sheet1.csv")
-        df_feed = pd.read_csv("feedback_clientes_limpio.csv")
-        return df_inv, df_trans, df_feed
-    except FileNotFoundError as e:
-        st.error(f"Error cargando archivos: {e}")
-        return None, None, None
-
-def create_master_table(inv, trans, feed):
-    # Merge 1: Transacciones + Inventario (Left Join para mantener todas las ventas)
-    # Asumimos que la llave común es SKU_ID (ajustar si los nombres varían ligeramente)
-    df_merged = pd.merge(trans, inv, on="SKU_ID", how="left", suffixes=('_trx', '_inv'))
-    
-    # Merge 2: Resultado + Feedback (Left Join)
-    # Asumimos que la llave común es Transaccion_ID
-    df_final = pd.merge(df_merged, feed, on="Transaccion_ID", how="left")
-    
-    return df_final
-
-# Ejecutar carga
-df_inv, df_trans, df_feed = load_data()
-
-if df_inv is not None:
-    df_master = create_master_table(df_inv, df_trans, df_feed)
-    st.sidebar.success("✅ Datos cargados y unificados correctamente")
-    
-    # Filtros Globales (Sidebar)
-    st.sidebar.header("🔍 Filtros Globales")
-    selected_city = st.sidebar.multiselect(
-        "Filtrar por Ciudad", 
-        options=df_master['Ciudad_Destino_norm'].unique(),
-        default=df_master['Ciudad_Destino_norm'].unique()
-    )
-    
-    # Filtrar el dataset maestro
-    df_filtered = df_master[df_master['Ciudad_Destino_norm'].isin(selected_city)]
-
-else:
-    st.stop()
-
-# -----------------------------------------------------------------------------
-# 3. ESTRUCTURA DE PESTAÑAS
-# -----------------------------------------------------------------------------
-tab_audit, tab_eda, tab_ai = st.tabs([
-    "📂 Auditoría & Calidad de Datos", 
-    "📈 EDA: Análisis Exploratorio", 
-    "🤖 Asistente Estratégico (Groq)"
-])
-
-# --- PESTAÑA 1: AUDITORÍA DE DATOS ---
-with tab_audit:
-    st.header("Auditoría de Limpieza")
-    st.caption("Visualización de los datasets originales post-limpieza para validación.")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.subheader("Inventario")
-        st.dataframe(df_inv.head(), use_container_width=True)
-        st.info(f"Registros: {df_inv.shape[0]} | Cols: {df_inv.shape[1]}")
+        df_inv, df_trans, df_feed, df_master = process_and_merge(up_inv, up_trans, up_feed)
+        st.sidebar.success("✅ Datos procesados exitosamente!")
         
-    with col2:
-        st.subheader("Transacciones")
-        st.dataframe(df_trans.head(), use_container_width=True)
-        st.info(f"Registros: {df_trans.shape[0]} | Cols: {df_trans.shape[1]}")
+        # Filtros Globales que aparecen SOLO cuando hay datos
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🔍 Filtros de Visualización")
         
-    with col3:
-        st.subheader("Feedback")
-        st.dataframe(df_feed.head(), use_container_width=True)
-        st.info(f"Registros: {df_feed.shape[0]} | Cols: {df_feed.shape[1]}")
+        if 'Ciudad_Destino_norm' in df_master.columns:
+            ciudades = df_master['Ciudad_Destino_norm'].unique()
+            selected_city = st.sidebar.multiselect("Filtrar por Ciudad", ciudades, default=ciudades)
+            df_filtered = df_master[df_master['Ciudad_Destino_norm'].isin(selected_city)]
+        else:
+            df_filtered = df_master # Fallback si no existe la columna
+            
+    except Exception as e:
+        st.error(f"Error procesando los archivos. Verifica que sean los CSV correctos.\nDetalle: {e}")
+        st.stop()
 
-    st.markdown("### Integridad del Master Table")
-    st.write("Muestra del tablón unificado (Transacciones + Inventario + Feedback):")
-    st.dataframe(df_master.head(3), use_container_width=True)
+    # -------------------------------------------------------------------------
+    # 4. ESTRUCTURA DE PESTAÑAS (Solo visible si hay datos)
+    # -------------------------------------------------------------------------
+    tab_audit, tab_eda, tab_ai = st.tabs([
+        "📂 Auditoría & Calidad", 
+        "📈 EDA: Análisis Exploratorio", 
+        "🤖 Asistente IA"
+    ])
 
-# --- PESTAÑA 2: EDA (UNIVARIADO & MULTIVARIADO) ---
-with tab_eda:
-    st.header("Análisis Exploratorio de Datos (EDA)")
-    
-    # Sub-sección: Univariado
-    with st.expander("📊 Análisis Univariado (Distribuciones Individuales)", expanded=True):
-        st.markdown("**Variables Cuantitativas (Ej. Precios, Tiempos)**")
-        col_u1, col_u2 = st.columns(2)
-        with col_u1:
-            # Placeholder para histograma
-            st.metric("Total Ventas (USD)", f"${df_filtered['Precio_Venta_Final'].sum():,.2f}")
-            fig_hist = px.histogram(df_filtered, x="Precio_Venta_Final", title="Distribución de Precios de Venta")
+    # --- TAB 1: AUDITORÍA ---
+    with tab_audit:
+        st.header("Vista Previa de Datos")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.subheader("Inventario")
+            st.dataframe(df_inv.head(5), use_container_width=True)
+            st.caption(f"{df_inv.shape[0]} filas | {df_inv.shape[1]} cols")
+        with col2:
+            st.subheader("Transacciones")
+            st.dataframe(df_trans.head(5), use_container_width=True)
+            st.caption(f"{df_trans.shape[0]} filas | {df_trans.shape[1]} cols")
+        with col3:
+            st.subheader("Feedback")
+            st.dataframe(df_feed.head(5), use_container_width=True)
+            st.caption(f"{df_feed.shape[0]} filas | {df_feed.shape[1]} cols")
+            
+        st.markdown("### Master Table (Unificado)")
+        st.dataframe(df_master.head(), use_container_width=True)
+
+    # --- TAB 2: EDA ---
+    with tab_eda:
+        st.header("Análisis Exploratorio")
+        
+        # Métricas Top (KPIs rápidos)
+        kpi1, kpi2, kpi3 = st.columns(3)
+        kpi1.metric("Ventas Totales", f"${df_filtered['Precio_Venta_Final'].sum():,.0f}")
+        kpi2.metric("Transacciones", f"{df_filtered.shape[0]:,}")
+        
+        # Calcular margen promedio si existen las columnas
+        if 'Costo_Unitario_USD' in df_filtered.columns:
+            margen_prom = (df_filtered['Precio_Venta_Final'] - df_filtered['Costo_Unitario_USD']).mean()
+            kpi3.metric("Margen Promedio (aprox)", f"${margen_prom:,.2f}")
+        
+        st.markdown("---")
+        
+        # Gráficas
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.subheader("Distribución de Precios")
+            fig_hist = px.histogram(df_filtered, x="Precio_Venta_Final", nbins=30, 
+                                    title="Histograma de Ventas")
             st.plotly_chart(fig_hist, use_container_width=True)
             
-        with col_u2:
-            st.markdown("**Variables Cualitativas (Ej. Estado Envío, Rating)**")
-            # Placeholder para conteo
-            fig_bar = px.bar(df_filtered['Estado_Envio'].value_counts().reset_index(), 
-                             x='Estado_Envio', y='count', title="Conteo por Estado de Envío")
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-    # Sub-sección: Multivariado
-    with st.expander("🔗 Análisis Multivariado (Correlaciones & Cruces)", expanded=True):
-        st.markdown("Cruce de variables para responder preguntas de negocio.")
-        
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.subheader("Relación Precio vs. Costo")
-            # Scatter Plot simple
-            fig_scatter = px.scatter(
-                df_filtered, 
-                x="Costo_Unitario_USD", 
-                y="Precio_Venta_Final", 
-                color="Categoria",
-                title="Dispersión: Costo vs. Precio Venta"
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
-            
-        with col_m2:
-            st.subheader("Tiempo Entrega vs. Satisfacción (NPS)")
-            # Boxplot o Scatter
-            if 'Satisfaccion_NPS' in df_filtered.columns:
-                fig_box = px.box(
-                    df_filtered, 
-                    x="Tiempo_Entrega_Real", 
-                    y="Satisfaccion_NPS", 
-                    title="Impacto del Tiempo en NPS"
-                )
-                st.plotly_chart(fig_box, use_container_width=True)
+        with col_g2:
+            if 'Categoria' in df_filtered.columns:
+                st.subheader("Ventas por Categoría")
+                fig_bar = px.bar(df_filtered.groupby('Categoria')['Precio_Venta_Final'].sum().reset_index(),
+                                 x='Categoria', y='Precio_Venta_Final',
+                                 title="Total Vendido por Categoría")
+                st.plotly_chart(fig_bar, use_container_width=True)
             else:
-                st.warning("Columna NPS no encontrada en el merge.")
+                st.info("Columna 'Categoria' no encontrada para graficar.")
 
-# --- PESTAÑA 3: IA & INSIGHTS ---
-with tab_ai:
-    st.header("🤖 Asistente Estratégico (Powered by Groq)")
+    # --- TAB 3: IA ---
+    with tab_ai:
+        st.header("🤖 Insights Generativos")
+        st.info("Sube tus credenciales de Groq en el sidebar o config (Pendiente de implementación)")
+        user_q = st.text_input("Pregunta a tus datos:")
+        if st.button("Consultar"):
+            st.write(f"Simulando respuesta para: '{user_q}'...")
+            st.success("La IA sugiere revisar el inventario en la bodega Norte.")
+
+else:
+    # -------------------------------------------------------------------------
+    # PANTALLA DE BIENVENIDA (ESTADO INICIAL)
+    # -------------------------------------------------------------------------
+    st.info("👋 ¡Bienvenido al DSS de TechLogistics!")
     st.markdown("""
-    Este módulo utiliza IA para interpretar los hallazgos del EDA y sugerir acciones correctivas.
+        Para comenzar, por favor utiliza el menú de la izquierda (**Sidebar**) para subir tus tres archivos CSV:
+        
+        1.  `inventario_central_*.csv`
+        2.  `transacciones_logistica_*.csv`
+        3.  `feedback_clientes_*.csv`
+        
+        *El sistema unificará los datos automáticamente una vez cargados.*
     """)
-    
-    col_ai_input, col_ai_output = st.columns([1, 2])
-    
-    with col_ai_input:
-        st.subheader("Consulta")
-        user_query = st.text_area(
-            "Escribe tu pregunta de negocio:",
-            placeholder="Ej: ¿Por qué tenemos SKUs con stock alto y ventas bajas?",
-            height=150
-        )
-        if st.button("Generar Insights 🚀"):
-            st.toast("Conectando con Llama-3 en Groq...")
-            # AQUI IRÁ LA LÓGICA DE LLAMADA A LA API
-            st.session_state['ai_response'] = "🚧 [Simulación] La IA sugiere revisar los SKUs de la categoría 'Laptops' en la bodega Norte..."
-            
-    with col_ai_output:
-        st.subheader("Respuesta Generativa")
-        if 'ai_response' in st.session_state:
-            st.info(st.session_state['ai_response'])
-        else:
-            st.markdown("*La respuesta de la IA aparecerá aquí...*")
-
-# Footer
-st.markdown("---")
-st.caption("TechLogistics DSS v1.0 | Desarrollado con Streamlit & Python")
+    # Imagen opcional de placeholder o instrucción visual
+    st.warning("⚠️ Esperando archivos...")
